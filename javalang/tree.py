@@ -2,12 +2,17 @@
 from .ast import Node
 
 # ------------------------------------------------------------------------------
+class ModularCompilationUnit(Node):
+    attrs = ("imports", "module")
 
-class CompilationUnit(Node):
+class OrdinaryCompilationUnit(Node):
     attrs = ("package", "imports", "types")
 
 class Import(Node):
     attrs = ("path", "static", "wildcard")
+
+class Module(Node):
+    attrs = ("is_open", "path", "requires", "exports", "uses", "provides", "opens")
 
 class Documented(Node):
     attrs = ("documentation",)
@@ -28,13 +33,16 @@ class TypeDeclaration(Declaration, Documented):
 
     @property
     def constructors(self):
-        return [decl for decl in self.body if isinstance(decl, ConstructorDeclaration)]
+        return [decl for decl in self.body if isinstance(decl, ConstructorDeclaration) or isinstance(decl, CompactConstructorDeclaration)]
 
 class PackageDeclaration(Declaration, Documented):
     attrs = ("name",)
 
 class ClassDeclaration(TypeDeclaration):
     attrs = ("type_parameters", "extends", "implements")
+
+class RecordDeclaration(TypeDeclaration):
+    attrs = ("type_parameters", "record_components", "implements")
 
 class EnumDeclaration(TypeDeclaration):
     attrs = ("implements",)
@@ -97,6 +105,9 @@ class FieldDeclaration(Member, Declaration):
 class ConstructorDeclaration(Declaration, Documented):
     attrs = ("type_parameters", "name", "parameters", "throws", "body")
 
+class CompactConstructorDeclaration(Declaration, Documented):
+    attrs = ("type_parameters", "name", "body")
+
 # ------------------------------------------------------------------------------
 
 class ConstantDeclaration(FieldDeclaration):
@@ -119,6 +130,9 @@ class FormalParameter(Declaration):
 
 class InferredFormalParameter(Node):
     attrs = ('name',)
+
+class RecordComponent(Node):
+    attrs = ('annotations', 'type', 'name', 'varargs')
 
 # ------------------------------------------------------------------------------
 

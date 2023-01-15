@@ -33,7 +33,7 @@ class JavaToken(object):
 class EndOfInput(JavaToken):
     pass
 
-class Keyword(JavaToken):
+class ReservedKeyword(JavaToken):
     VALUES = set(['abstract', 'assert', 'boolean', 'break', 'byte', 'case',
                   'catch', 'char', 'class', 'const', 'continue', 'default',
                   'do', 'double', 'else', 'enum', 'extends', 'final',
@@ -42,15 +42,21 @@ class Keyword(JavaToken):
                   'new', 'package', 'private', 'protected', 'public', 'return',
                   'short', 'static', 'strictfp', 'super', 'switch',
                   'synchronized', 'this', 'throw', 'throws', 'transient', 'try',
-                  'void', 'volatile', 'while'])
+                  'void', 'volatile', 'while', "_"])
+
+class ContextualKeyword(JavaToken):
+    VALUES = set(['exports', 'opens', 'requires', 'uses', 
+                  'module', 'permits', 'sealed', 'var', 
+                  'non-sealed', 'provides', 'to', 'with',
+                  'open', 'record', 'transitive', 'yield'])
 
 
-class Modifier(Keyword):
+class Modifier(ReservedKeyword):
     VALUES = set(['abstract', 'default', 'final', 'native', 'private',
                   'protected', 'public', 'static', 'strictfp', 'synchronized',
                   'transient', 'volatile'])
 
-class BasicType(Keyword):
+class BasicType(ReservedKeyword):
     VALUES = set(['boolean', 'byte', 'char', 'double',
                   'float', 'int', 'long', 'short'])
 
@@ -88,6 +94,9 @@ class Character(Literal):
     pass
 
 class String(Literal):
+    pass
+
+class TextBlock(Literal):
     pass
 
 class Null(Literal):
@@ -237,6 +246,60 @@ class JavaTokenizer(object):
             j += 1
 
         self.j = j + 1
+
+    def read_text_block(self):
+        delim = self.data[self.i]
+
+        STATE_BASIC = 0
+        STATE_ESC_FOUND = 1
+        STATE_POSSIBLE_TRIPLE_OCTAL_DIGIT = 2
+        STATE_POSSIBLE_DOUBLE_OCTAL_DIGIT = 3
+
+        state = 0
+        j = self.i + 3
+        length = self.length
+
+        while True:
+            if j + 2 >= length:
+                self.error('Unterminated block string literal')
+                break
+
+            if state == STATE_BASIC:
+                if self.data[j] == '\\':
+                    state = STATE_ESC_FOUND
+                elif self.data[j] == delim and self.data[j + 1] == delim and self.data[j + 2] == delim:
+                    break
+
+            elif state == STATE_ESC_FOUND:
+                if self.data[j] in 'btnfru"\'\\':
+                    state = STATE_BASIC
+                elif self.data[j] in '0123':
+                    state = STATE_POSSIBLE_TRIPLE_OCTAL_DIGIT
+                elif self.data[j] in '4567':
+                    state = STATE_POSSIBLE_DOUBLE_OCTAL_DIGIT
+                else:
+                    self.error('Illegal escape character', self.data[j])
+
+            elif state == STATE_POSSIBLE_TRIPLE_OCTAL_DIGIT:
+                # Possibly long octal
+                if self.data[j] in '01234567':
+                    state = 3
+                elif self.data[j] == '\\':
+                    state = STATE_ESC_FOUND
+                elif self.data[j] == delim:
+                    break
+
+            elif state == STATE_POSSIBLE_DOUBLE_OCTAL_DIGIT:
+                state = STATE_BASIC
+
+                if self.data[j] == '\\':
+                    state = STATE_ESC_FOUND
+                elif self.data[j] == delim and self.data[j + 1] == delim and self.data[j + 2] == delim:
+                    break
+
+            j += 1
+
+        self.j = j + 3
 
     def try_operator(self):
         for l in range(min(self.length - self.i, Operator.MAX_LEN), 0, -1):
@@ -405,19 +468,44 @@ class JavaTokenizer(object):
         return unicodedata.category(c) in self.IDENT_START_CATEGORIES
 
     def read_identifier(self):
+        # Enter... the ONE identifier that doesnt fit the pattern at all, a contextual keyword called non-sealed
+        # 
+        # Now... this is a bit of a silly exercise, rather than call it non_sealed, like a normal person
+        # this _had_ to be a ContextualKeyword meaning that in Java8
+        # 
+        # int i = non-sealed;
+        #
+        # Means you'd like to subtract 2 things, whereas in Java whatever, it's suddenly a syntax error
+        # HOWEVER, this also means that 
+        #
+        # non-sealed2 is not an identifier, its 'non' (Identifier), '-' (Operator), 'sealed2' (Identifier)
+        # 
+        # This means this piece of code identifier if the string starts with non-sealed AND 
+        # (whether it stops there OR the next char ISNT a java identifier-char)
+        #
+        # Java is truly amazing -_-  
+        if self.data.startswith("non-sealed", self.i) and (
+                self.i + len('non-sealed') >= len(self.data) or 
+                not unicodedata.category(self.data[self.i + len('non-sealed')]) in self.IDENT_PART_CATEGORIES
+            ):
+            self.j = self.i + 10
+            return ContextualKeyword
+
         self.j = self.i + 1
 
         while self.j < len(self.data) and unicodedata.category(self.data[self.j]) in self.IDENT_PART_CATEGORIES:
             self.j += 1
 
         ident = self.data[self.i:self.j]
-        if ident in Keyword.VALUES:
-            token_type = Keyword
+        if ident in ReservedKeyword.VALUES:
+            token_type = ReservedKeyword
 
             if ident in BasicType.VALUES:
                 token_type = BasicType
             elif ident in Modifier.VALUES:
                 token_type = Modifier
+        elif ident in ContextualKeyword.VALUES:
+            token_type = ContextualKeyword
 
         elif ident in Boolean.VALUES:
             token_type = Boolean
@@ -530,6 +618,10 @@ class JavaTokenizer(object):
             elif self.try_separator():
                 token_type = Separator
 
+            elif self.i + 2 < self.length and self.data[self.i] == self.data[self.i + 1] == self.data[self.i + 2] == '"':
+                token_type = TextBlock
+                self.read_text_block()
+
             elif c in ("'", '"'):
                 token_type = String
                 self.read_string()
@@ -595,7 +687,7 @@ def reformat_tokens(tokens):
             output.append(' ' * indent)
             output.append('}')
 
-            if isinstance(token, (Literal, Keyword, Identifier)):
+            if isinstance(token, (Literal, ReservedKeyword, ContextualKeyword, Identifier)):
                 output.append('\n')
                 output.append(' ' * indent)
 
@@ -610,7 +702,7 @@ def reformat_tokens(tokens):
         elif token.value == ',':
             output.append(', ')
 
-        elif isinstance(token, (Literal, Keyword, Identifier)):
+        elif isinstance(token, (Literal, ReservedKeyword, ContextualKeyword, Identifier)):
             if ident_last:
                 # If the last token was a literla/keyword/identifer put a space in between
                 output.append(' ')
@@ -627,7 +719,7 @@ def reformat_tokens(tokens):
         else:
             output.append(token.value)
 
-        ident_last = isinstance(token, (Literal, Keyword, Identifier))
+        ident_last = isinstance(token, (Literal, ReservedKeyword, ContextualKeyword, Identifier))
 
     if closed_block:
         output.append('\n}')

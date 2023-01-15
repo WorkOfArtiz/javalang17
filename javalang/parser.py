@@ -3,61 +3,60 @@ import six
 from . import util
 from . import tree
 from .tokenizer import (
-    EndOfInput, Keyword, Modifier, BasicType, Identifier,
+    EndOfInput, ReservedKeyword, ContextualKeyword, Modifier, BasicType, Identifier,
     Annotation, Literal, Operator, JavaToken,
     )
 
-ENABLE_DEBUG_SUPPORT = False
+ENABLE_DEBUG_SUPPORT = True
 
 def parse_debug(method):
     global ENABLE_DEBUG_SUPPORT
 
-    if ENABLE_DEBUG_SUPPORT:
-        def _method(self):
-            if not hasattr(self, 'recursion_depth'):
-                self.recursion_depth = 0
-
-            if self.debug:
-                depth = "%02d" % (self.recursion_depth,)
-                token = six.text_type(self.tokens.look())
-                start_value = self.tokens.look().value
-                name = method.__name__
-                sep = ("-" * self.recursion_depth)
-                e_message = ""
-
-                print("%s %s> %s(%s)" % (depth, sep, name, token))
-
-                self.recursion_depth += 1
-
-                try:
-                    r = method(self)
-
-                except JavaSyntaxError as e:
-                    e_message = e.description
-                    raise
-
-                except Exception as e:
-                    e_message = six.text_type(e)
-                    raise
-
-                finally:
-                    token = six.text_type(self.tokens.last())
-                    print("%s <%s %s(%s, %s) %s" %
-                        (depth, sep, name, start_value, token, e_message))
-                    self.recursion_depth -= 1
-            else:
-                self.recursion_depth += 1
-                try:
-                    r = method(self)
-                finally:
-                    self.recursion_depth -= 1
-
-            return r
-
-        return _method
-
-    else:
+    if not ENABLE_DEBUG_SUPPORT:
         return method
+    
+    def _method(self):
+        if not hasattr(self, 'recursion_depth'):
+            self.recursion_depth = 0
+
+        if self.debug:
+            depth = "%02d" % (self.recursion_depth,)
+            token = six.text_type(self.tokens.look())
+            start_value = self.tokens.look().value
+            name = method.__name__
+            sep = ("-" * self.recursion_depth)
+            e_message = ""
+
+            print("%s %s> %s(%s)" % (depth, sep, name, token))
+
+            self.recursion_depth += 1
+
+            try:
+                r = method(self)
+
+            except JavaSyntaxError as e:
+                e_message = e.description
+                raise
+
+            except Exception as e:
+                e_message = six.text_type(e)
+                raise
+
+            finally:
+                token = six.text_type(self.tokens.last())
+                print("%s <%s %s(%s, %s) %s" %
+                    (depth, sep, name, start_value, token, e_message))
+                self.recursion_depth -= 1
+        else:
+            self.recursion_depth += 1
+            try:
+                r = method(self)
+            finally:
+                self.recursion_depth -= 1
+
+        return r
+
+    return _method
 
 # ------------------------------------------------------------------------------
 # ---- Parsing exception ----
@@ -137,6 +136,7 @@ class Parser(object):
         return last.value
 
     def would_accept(self, *accepts):
+        """Asks the tokenizer if it would accept accepts in order (either as token types or strings)"""
         if len(accepts) == 0:
             raise JavaParserError("Missing acceptable values")
 
@@ -152,6 +152,7 @@ class Parser(object):
         return True
 
     def try_accept(self, *accepts):
+        """Tries to accept a token"""
         if len(accepts) == 0:
             raise JavaParserError("Missing acceptable values")
 
@@ -262,6 +263,40 @@ class Parser(object):
 
     @parse_debug
     def parse_compilation_unit(self):
+        """
+        Tries to determine if this is an ordinary compilation unit or a modular 
+        compilation unit and calls the appropriate method
+        """
+        self.tokens.push_marker()
+        
+        # Let's try to parse as many imports as possible (modular starts with 0 or more)
+        import_declarations = list()
+        while self.would_accept('import'):
+            token = self.tokens.look()
+            import_declaration = self.parse_import_declaration()
+            import_declaration._position = token.position
+            import_declarations.append(import_declaration)
+
+        if self.is_annotation():
+            module_annotations = self.parse_annotations()
+       
+        module_is_open = False
+        if self.try_accept('open'):
+            module_is_open = True
+        
+        if self.would_accept('module'):
+            self.tokens.pop_marker(False)
+            return self.parse_module_compilation_unit(import_declarations, module_annotations, module_is_open)
+        else:
+            self.tokens.pop_marker(True)
+            return self.parse_ordinary_compilation_unit()
+
+    @parse_debug
+    def parse_module_compilation_unit(self, imports, module_annotations, module_is_open):
+        raise NotImplementedError("I... just dont care enough yet. Will add this later")
+
+    @parse_debug
+    def parse_ordinary_compilation_unit(self):
         package = None
         package_annotations = None
         javadoc = None
@@ -299,14 +334,14 @@ class Parser(object):
 
         while not isinstance(self.tokens.look(), EndOfInput):
             try:
-                type_declaration = self.parse_type_declaration()
+                type_declaration = self.parse_top_level_class_or_interface_declaration()
             except StopIteration:
                 self.illegal("Unexpected end of input")
 
             if type_declaration:
                 type_declarations.append(type_declaration)
 
-        return tree.CompilationUnit(package=package,
+        return tree.OrdinaryCompilationUnit(package=package,
                                     imports=import_declarations,
                                     types=type_declarations)
 
@@ -340,7 +375,7 @@ class Parser(object):
                            wildcard=import_all)
 
     @parse_debug
-    def parse_type_declaration(self):
+    def parse_top_level_class_or_interface_declaration(self):
         if self.try_accept(';'):
             return None
         else:
@@ -358,6 +393,8 @@ class Parser(object):
             type_declaration = self.parse_enum_declaration()
         elif token.value == 'interface':
             type_declaration = self.parse_normal_interface_declaration()
+        elif token.value == 'record':
+            type_declaration = self.parse_record_declaration()
         elif self.is_annotation_declaration():
             type_declaration = self.parse_annotation_type_declaration()
         else:
@@ -398,6 +435,65 @@ class Parser(object):
                                      extends=extends,
                                      implements=implements,
                                      body=body)
+
+    @parse_debug 
+    def parse_record_declaration(self):
+        self.accept('record')
+        
+        name = self.parse_identifier()
+        type_params = None
+        record_components = None
+        body = None
+        
+        if self.would_accept('<'):
+            type_params = self.parse_type_parameters()
+        
+        record_components = self.parse_record_header()
+        
+        implements = self.parse_type_list() if self.try_accept('implements') else None
+
+        body = self.parse_record_body()
+        return tree.RecordDeclaration(name=name,
+                                     type_parameters=type_params,
+                                     record_components=record_components,
+                                     implements=implements,
+                                     body=body)
+
+    @parse_debug
+    def parse_record_header(self):
+        record_components = list()
+
+        self.accept('(')
+        if self.try_accept(')'):
+            return record_components
+
+        record_components.append(self.parse_record_component())
+        while self.try_accept(','):
+            record_components.append(self.parse_record_component())
+
+        self.accept(')')
+        
+        return record_components
+
+    @parse_debug
+    def parse_record_component(self):
+        token = self.tokens.look()
+
+        annotations = self.parse_annotations() if self.is_annotation() else None
+        parameter_type = self.parse_type()
+        varargs = self.try_accept('...')
+
+        parameter_name = self.parse_identifier()
+        parameter_type.dimensions += self.parse_array_dimension()
+
+        parameter = tree.RecordComponent(
+            annotations=annotations, 
+            type=parameter_type, 
+            name=parameter_name, 
+            varargs=varargs
+        )
+
+        parameter._position = token.position
 
     @parse_debug
     def parse_enum_declaration(self):
@@ -637,8 +733,12 @@ class Parser(object):
 
         while True:
             token = self.tokens.look()
+
             if self.would_accept(Modifier):
                 modifiers.add(self.accept(Modifier))
+
+            elif self.would_accept('non-sealed') or self.would_accept('sealed'):
+                modifiers.add(self.accept(ContextualKeyword))
 
             elif self.is_annotation():
                 annotation = self.parse_annotation()
@@ -774,6 +874,25 @@ class Parser(object):
         return declarations
 
     @parse_debug
+    def parse_record_body(self):
+        declarations = list()
+
+        self.accept('{')
+
+        while not self.would_accept('}'):
+            declaration = self.parse_compact_constructor_declaration()
+            if declaration:
+                declarations.append(declaration)
+            else:
+                declaration = self.parse_class_body_declaration()
+                if declaration:
+                    declarations.append(declaration)
+
+        self.accept('}')
+
+        return declarations
+
+    @parse_debug
     def parse_class_body_declaration(self):
         token = self.tokens.look()
 
@@ -791,6 +910,32 @@ class Parser(object):
             return self.parse_member_declaration()
 
     @parse_debug
+    def parse_compact_constructor_declaration(self):
+        self.tokens.push_marker()
+        token = self.tokens.look()
+
+        modifiers, annotations, javadoc = self.parse_modifiers()
+
+        if not self.would_accept(Identifier, '{'):
+            self.tokens.pop_marker(True)
+            return None
+        
+        self.tokens.pop_marker(False)
+        constructor_name = self.parse_identifier()
+        body = self.parse_block()
+        
+        decl = tree.CompactConstructorDeclaration(
+            name=constructor_name,
+            body=body,
+            modifiers = modifiers,
+            annotations = annotations,
+            documentation = javadoc,
+        )
+
+        decl._position = token.position
+        return decl
+
+    @parse_debug
     def parse_member_declaration(self):
         modifiers, annotations, javadoc = self.parse_modifiers()
         member = None
@@ -806,6 +951,9 @@ class Parser(object):
 
         elif token.value == 'class':
             member = self.parse_normal_class_declaration()
+
+        elif token.value == 'record':
+            member = self.parse_record_declaration()
 
         elif token.value == 'enum':
             member = self.parse_enum_declaration()
@@ -1144,6 +1292,9 @@ class Parser(object):
 
             if self.try_accept('...'):
                 varargs = True
+
+                if self.is_annotation():
+                    raise NotImplementedError("var arg specific implementations arent yet supported")
 
             parameter_name = self.parse_identifier()
             parameter_type.dimensions += self.parse_array_dimension()

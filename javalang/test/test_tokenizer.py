@@ -18,6 +18,126 @@ class TestTokenizer(unittest.TestCase):
         self.assertEqual(type(tokens[0]), tokenizer.Annotation)
         self.assertEqual(type(tokens[1]), tokenizer.Identifier)
 
+    def test_string_tokenizer(self):
+        # Given
+        code = '"String \\0 something \\377"'
+
+        # When
+        tokens = list(tokenizer.tokenize(code))
+
+        # Then
+        self.assertEqual(len(tokens), 1)
+        self.assertEqual(tokens[0].value, code)
+        self.assertEqual(type(tokens[0]), tokenizer.String)
+
+    def test_textblock_tokenizer(self):
+        # Given
+        code = '''"""
+        String
+        """'''
+
+        # When
+        tokens = list(tokenizer.tokenize(code))
+
+        # Then
+        self.assertEqual(len(tokens), 1)
+        self.assertEqual(tokens[0].value, code)
+        self.assertEqual(type(tokens[0]), tokenizer.TextBlock)
+
+        code = '''"""
+        "When I use a word," Humpty Dumpty said,
+        in rather a scornful tone, "it means just what I
+        choose it to mean - neither more nor less."
+        "The question is," said Alice, "whether you
+        can make words mean so many different things."
+        "The question is," said Humpty Dumpty,
+        "which is to be master - that's all.\\""""'''
+
+         # When
+        tokens = list(tokenizer.tokenize(code))
+
+        # Then
+        self.assertEqual(len(tokens), 1)
+        self.assertEqual(tokens[0].value, code)
+        self.assertEqual(type(tokens[0]), tokenizer.TextBlock)
+
+        code = '''"""
+        "When I use a word," Humpty Dumpty said,
+        in rather a scornful tone, "it means just what I
+        choose it to mean - neither more nor less."
+        "The question is," said Alice, "whether you
+        can make words mean so many different things."
+        "The question is," said Humpty Dumpty,
+        "which is to be master - that's all.""""'''
+
+         # When
+        with self.assertRaises(tokenizer.LexerError):
+            tokens = list(tokenizer.tokenize(code))
+
+    def test_contextual(self):
+        # Given
+        code = 'record var auto const static'
+
+        # When
+        tokens = list(tokenizer.tokenize(code))
+
+        # Then
+        self.assertEqual(len(tokens), 5)
+        self.assertEqual(tokens[0].value, "record")
+        self.assertEqual(type(tokens[0]), tokenizer.ContextualKeyword)
+        self.assertEqual(tokens[1].value, "var")
+        self.assertEqual(type(tokens[1]), tokenizer.ContextualKeyword)
+        self.assertEqual(tokens[2].value, "auto")
+        self.assertEqual(type(tokens[2]), tokenizer.Identifier)
+        self.assertEqual(tokens[3].value, "const")
+        self.assertEqual(type(tokens[3]), tokenizer.ReservedKeyword)
+        self.assertEqual(tokens[4].value, "static")
+        self.assertEqual(type(tokens[4]), tokenizer.Modifier)
+
+    def test_non_sealed(self):
+        # Given
+        code = 'non-sealed'
+
+        # When
+        tokens = list(tokenizer.tokenize(code))
+
+        # Then
+        self.assertEqual(tokens[0].value, "non-sealed")
+        self.assertEqual(len(tokens), 1)
+        self.assertEqual(type(tokens[0]), tokenizer.ContextualKeyword)
+
+    def test_non_sealed2(self):
+        # Given
+        code = 'non-sealed class A'
+
+        # When
+        tokens = list(tokenizer.tokenize(code))
+
+        # Then
+        self.assertEqual(len(tokens), 3)
+        self.assertEqual(tokens[0].value, "non-sealed")
+        self.assertEqual(type(tokens[0]), tokenizer.ContextualKeyword)
+        self.assertEqual(tokens[1].value, "class")
+        self.assertEqual(type(tokens[1]), tokenizer.ReservedKeyword)
+        self.assertEqual(tokens[2].value, "A")
+        self.assertEqual(type(tokens[2]), tokenizer.Identifier)
+
+    def test_non_sealedteam(self):
+        # Given
+        code = 'non-sealed_team'
+
+        # When
+        tokens = list(tokenizer.tokenize(code))
+
+        # Then
+        self.assertEqual(len(tokens), 3)
+        self.assertEqual(tokens[0].value, "non")
+        self.assertEqual(type(tokens[0]), tokenizer.Identifier)
+        self.assertEqual(tokens[1].value, "-")
+        self.assertEqual(type(tokens[1]), tokenizer.Operator)
+        self.assertEqual(tokens[2].value, "sealed_team")
+        self.assertEqual(type(tokens[2]), tokenizer.Identifier)
+
     def test_tokenizer_javadoc(self):
         # Given
         code = "/**\n" \
