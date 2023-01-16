@@ -75,6 +75,9 @@ class ReferenceType(Type):
 class TypeArgument(Node):
     attrs = ("type", "pattern_type")
 
+class InferredType(Node):
+    attrs = ()
+
 # ------------------------------------------------------------------------------
 
 class TypeParameter(Node):
