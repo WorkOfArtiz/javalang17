@@ -160,6 +160,9 @@ class AssertStatement(Statement):
 class BreakStatement(Statement):
     attrs = ("goto",)
 
+class YieldStatement(Statement):
+    attrs = ("expression",)
+
 class ContinueStatement(Statement):
     attrs = ("goto",)
 
@@ -180,9 +183,6 @@ class SwitchStatement(Statement):
 
 class BlockStatement(Statement):
     attrs = ("statements",)
-
-class StatementExpression(Statement):
-    attrs = ("expression",)
 
 # ------------------------------------------------------------------------------
 
@@ -228,6 +228,15 @@ class MethodReference(Expression):
 
 class LambdaExpression(Expression):
     attrs = ('parameters', 'body')
+
+class StatementExpression(Expression):
+    attrs = ("expression",)
+
+class SwitchExpression(Expression):
+    attrs = ("expression", "switch_rules")
+
+class SwitchRule(Node):
+    attrs = ("case_constants", "case_body")
 
 # ------------------------------------------------------------------------------
 

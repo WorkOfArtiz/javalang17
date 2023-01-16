@@ -1568,15 +1568,8 @@ class Parser(object):
             statement._position = token.position
             return statement
 
-        elif self.try_accept('switch'):
-            switch_expression = self.parse_par_expression()
-            self.accept('{')
-            switch_block = self.parse_switch_block_statement_groups()
-            self.accept('}')
-
-            statement = tree.SwitchStatement(expression=switch_expression, cases=switch_block)
-            statement._position = token.position
-            return statement
+        elif self.would_accept('switch'):
+            return self.parse_switch_statement_or_switch_statement_expression()
 
         elif self.try_accept('while'):
             condition = self.parse_par_expression()
@@ -1615,6 +1608,12 @@ class Parser(object):
             self.accept(';')
 
             statement = tree.BreakStatement(goto=label)
+            statement._position = token.position
+            return statement
+
+        elif self.try_accept('yield'):
+            expression = self.parse_expression()
+            statement = tree.YieldStatement(expression=expression)
             statement._position = token.position
             return statement
 
@@ -1700,6 +1699,47 @@ class Parser(object):
             statement = tree.StatementExpression(expression=expression)
             statement._position = token.position
             return statement
+
+    @parse_debug
+    def parse_switch_statement_or_switch_statement_expression(self):
+        self.tokens.push_marker()
+        token = self.tokens.look()
+
+        self.accept('switch')
+        switch_expression = self.parse_par_expression()
+        self.accept('{')
+
+        self.tokens.push_marker()
+
+        if self.try_accept('case'):
+            self.parse_conditional_expression()
+            while self.try_accept(','):
+                self.parse_conditional_expression()
+        else:
+            self.accept('default')
+
+        if self.try_accept(':'):
+            self.tokens.pop_marker(True)
+
+            switch_block = self.parse_switch_block_statement_groups()
+            self.accept('}')
+
+            statement = tree.SwitchStatement(expression=switch_expression, cases=switch_block)
+            statement._position = token.position
+
+            self.tokens.pop_marker(False)
+            return statement
+        elif self.try_accept('->'):
+            self.tokens.pop_marker(True)
+            self.tokens.pop_marker(True)
+            switch_expression = self.parse_switch_expression()
+            switch_expression._position = token.position
+
+            self.accept(';')
+            return tree.StatementExpression(expression=switch_expression)
+        else:
+            token = self.tokens.look()
+            self.illegal(f"In switch there should be either switch rules or blocks, found: {token.value}")
 
 # ------------------------------------------------------------------------------
 # -- Try / catch --
@@ -1966,6 +2006,22 @@ class Parser(object):
         return expression_2
 
     @parse_debug
+    def parse_conditional_expression(self):
+        """Rewrite to fix switch expressions"""
+        expression_2 = self.parse_expression_2()
+
+        if self.try_accept('?'):
+            true_expression = self.parse_expression()
+            self.accept(':')
+            false_expression = self.parse_expressionl()
+
+            return tree.TernaryExpression(condition=expression_2,
+                                          if_true=true_expression,
+                                          if_false=false_expression)
+
+        return expression_2
+
+    @parse_debug
     def parse_expression_2(self):
         expression_3 = self.parse_expression_3()
         token = self.tokens.look()
@@ -2022,6 +2078,8 @@ class Parser(object):
                                      expression=expression)
             except JavaSyntaxError:
                 pass
+        elif self.would_accept('switch'):
+            return self.parse_switch_expression()
 
         primary = self.parse_primary()
         primary.prefix_operators = prefix_operators
@@ -2042,6 +2100,58 @@ class Parser(object):
             token = self.tokens.look()
 
         return primary
+
+    @parse_debug
+    def parse_switch_expression(self):
+        self.accept('switch')
+        switch_expression = self.parse_par_expression()
+        self.accept('{')
+        switch_rules = self.parse_switch_rules()
+        self.accept('}')
+
+        return tree.SwitchExpression(expression=switch_expression, switch_rules=switch_rules)
+
+    @parse_debug
+    def parse_switch_rules(self):
+        switch_rules = list()
+
+        while self.tokens.look().value in ('case', 'default'):
+            switch_rule = self.parse_switch_rule()
+            switch_rules.append(switch_rule)
+
+        return switch_rules
+
+    @parse_debug
+    def parse_switch_rule(self):
+        labels = list()
+        statements = list()
+
+        if self.try_accept('case'):
+            case_constants = [ self.parse_conditional_expression() ]
+            while self.try_accept(','):
+                case_constants.append(self.parse_conditional_expression())
+        else:
+            self.accept('default')
+            case_constants = []
+
+        self.accept('->')
+
+        if self.would_accept('{'):
+            case_body = self.parse_block()
+        elif self.would_accept('throw'):
+            token = self.tokens.look()
+
+            self.accept('throw')
+            value = self.parse_expression()
+            self.accept(';')
+
+            case_body = tree.ThrowStatement(expression=value)
+            case_body._position = token.position
+        else:
+            case_body = self.parse_expression()
+            self.accept(';')
+
+        return tree.SwitchRule(case_constants=case_constants, case_body=case_body)
 
     @parse_debug
     def parse_method_reference(self):
