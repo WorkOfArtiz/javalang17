@@ -494,6 +494,7 @@ class Parser(object):
         )
 
         parameter._position = token.position
+        return parameter
 
     @parse_debug
     def parse_enum_declaration(self):
@@ -1144,6 +1145,8 @@ class Parser(object):
             declaration = self.parse_normal_interface_declaration()
         elif self.would_accept('enum'):
             declaration = self.parse_enum_declaration()
+        elif self.would_accept('record'):
+            declaration = self.parse_record_declaration()
         elif self.is_annotation_declaration():
             declaration = self.parse_annotation_type_declaration()
         elif self.would_accept('<'):
@@ -1887,9 +1890,14 @@ class Parser(object):
     @parse_debug
     def parse_for_var_control(self):
         modifiers, annotations = self.parse_variable_modifiers()
-        var_type = self.parse_type()
-        var_name = self.parse_identifier()
-        var_type.dimensions += self.parse_array_dimension()
+
+        if self.try_accept('var'):
+            var_type = tree.InferredType()
+            var_name = self.parse_identifier()
+        else:
+            var_type = self.parse_type()
+            var_name = self.parse_identifier()
+            var_type.dimensions += self.parse_array_dimension()
 
         var = tree.VariableDeclaration(modifiers=modifiers,
                                        annotations=annotations,
