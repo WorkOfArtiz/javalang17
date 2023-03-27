@@ -208,6 +208,11 @@ class EnhancedForControl(Node):
 
 # ------------------------------------------------------------------------------
 
+class Pattern(Node):
+    attrs = ("expression", "type", "variable")
+
+# ------------------------------------------------------------------------------
+
 class Expression(Node):
     attrs = ()
 

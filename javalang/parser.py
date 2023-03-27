@@ -2304,6 +2304,19 @@ class Parser(object):
     def parse_par_expression(self):
         self.accept('(')
         expression = self.parse_expression()
+
+        next_tok = self.tokens.look()
+
+        if isinstance(expression, tree.BinaryOperation) and \
+            expression.operator == 'instanceof' and \
+            isinstance(next_tok, Identifier):
+
+            expression = tree.Pattern(                        \
+                expression=expression.operandl,               \
+                type=expression.operandr,                     \
+                variable=self.parse_identifier()              \
+            )
+            #print("Pattern found %s" % expression)
         self.accept(')')
 
         return expression
