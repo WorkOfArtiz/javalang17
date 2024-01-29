@@ -39,7 +39,7 @@ class PackageDeclaration(Declaration, Documented):
     attrs = ("name",)
 
 class ClassDeclaration(TypeDeclaration):
-    attrs = ("type_parameters", "extends", "implements")
+    attrs = ("type_parameters", "extends", "implements", "permits")
 
 class RecordDeclaration(TypeDeclaration):
     attrs = ("type_parameters", "record_components", "implements")

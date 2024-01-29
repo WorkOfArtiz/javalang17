@@ -413,6 +413,7 @@ class Parser(object):
         type_params = None
         extends = None
         implements = None
+        permits = None
         body = None
 
         self.accept('class')
@@ -428,12 +429,16 @@ class Parser(object):
         if self.try_accept('implements'):
             implements = self.parse_type_list()
 
+        if self.try_accept('permits'):
+            permits = self.parse_type_list()
+
         body = self.parse_class_body()
 
         return tree.ClassDeclaration(name=name,
                                      type_parameters=type_params,
                                      extends=extends,
                                      implements=implements,
+                                     permits=permits,
                                      body=body)
 
     @parse_debug
